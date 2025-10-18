@@ -1,0 +1,35 @@
+<html>
+  <head>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/5.3.3/css/bootstrap.min.css" crossorigin="anonymous">
+    <style>
+      body {
+        font-family: Arial, Helvetica, sans-serif;
+        margin: 12px; padding: 12px;
+      }
+      h1 {color:#3366CC; font-size: 36px;}
+      input {
+        color:#009999; font-size: 28px;
+        box-shadow: 0 0 6px teal; margin: 2px;
+        padding-left: 6px; padding-right: 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <script>0</script>
+    <div class="container">
+    <h1>Select a script to run:</h1>
+    <form method="put" action="/run_my_first_test">
+      <input type="submit" value="pytest my_first_test.py">
+    </form>
+    <form method="put" action="/run_test_demo_site">
+      <input type="submit" value="pytest test_demo_site.py">
+    </form>
+    <form method="put" action="/run_my_first_test_with_demo_mode">
+      <input type="submit" value="pytest my_first_test.py --demo">
+    </form>
+    <form method="put" action="/run_test_demo_site_with_demo_mode">
+      <input type="submit" value="pytest test_demo_site.py --demo">
+    </form>
+    </div>
+  </body>
+</html>
