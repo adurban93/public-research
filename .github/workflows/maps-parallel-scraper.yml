@@ -1,0 +1,383 @@
+name: Maps Parallel Scraper
+
+on:
+  workflow_dispatch:
+    inputs:
+      queries:
+        description: "Comma-separated list of queries (primary and follow-ups)"
+        required: true
+        type: string
+        default: "warehouse, business center, technology park, convenience store, grocery, family diner, food beverage brokerage, farm feed, financial, gas station, truck stop, rest stop, juice shop, holistic, yoga pilates, food service, kitchen for rent, campus, home improvement, fulfillment, government office, aging clinic, nursing, golf, store, restaurant, kitchen repair, auto repair, campground, roasted nuts, dog park, pet store, feed store, heavy equipment, escape room, brunch, construction, business incubator, llc, corporation, law firm partners, associates, sales team, technician, electrician, hardware supply, hobby store, landscape supply, garden center, amusement, library, repair service, fast food, shopping, lounge, pub, night club, entertainment venue, video games, supermarket, sporting goods, butcher, deli, products distributor, shipping, health clinic, nutrition, dry cleaning laundry, disc golf, retail, department store, supplements, car clean, event center, liquor production, shooting range, classes, bowling, laser tag, sports complex, candy store, locksmith, equine"
+      coordinates:
+        description: "Comma-separated latitude,longitude pair (optional)"
+        required: false
+        type: string
+        default: ""
+      zoom:
+        description: "Map zoom level when coordinates are provided"
+        required: false
+        type: number
+        default: 12
+      headed:
+        description: "Run with browser UI (true/false)"
+        required: false
+        type: boolean
+        default: false
+      capture_screenshots:
+        description: "Include screenshots in workflow artifacts"
+        required: false
+        type: boolean
+        default: false
+      capture_page_source:
+        description: "Include HTML page sources in workflow artifacts"
+        required: false
+        type: boolean
+        default: false
+      scroll_max:
+        description: "Maximum sidebar scrolls"
+        required: false
+        type: number
+        default: 60
+      max_parse_results:
+        description: "Max results per query (0=unlimited)"
+        required: false
+        type: number
+        default: 0
+      shards:
+        description: "Number of matrix shards to split queries across"
+        required: false
+        type: number
+        default: 5
+  repository_dispatch:
+    types:
+      - maps-parallel-scrape
+
+jobs:
+  build-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.compute.outputs.matrix }}
+      lat: ${{ steps.params.outputs.lat }}
+      lon: ${{ steps.params.outputs.lon }}
+      coordinates: ${{ steps.params.outputs.coordinates }}
+      zoom: ${{ steps.params.outputs.zoom }}
+      headed: ${{ steps.params.outputs.headed }}
+      capture_screenshots: ${{ steps.params.outputs.capture_screenshots }}
+      capture_page_source: ${{ steps.params.outputs.capture_page_source }}
+      scroll_max: ${{ steps.params.outputs.scroll_max }}
+      max_parse_results: ${{ steps.params.outputs.max_parse_results }}
+      shards: ${{ steps.params.outputs.shards }}
+    steps:
+      - name: Resolve run parameters
+        id: params
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          WF_QUERIES: ${{ github.event.inputs.queries }}
+          WF_COORDINATES: ${{ github.event.inputs.coordinates }}
+          WF_LAT: ""
+          WF_LON: ""
+          WF_ZOOM: ${{ github.event.inputs.zoom }}
+          WF_HEADED: ${{ github.event.inputs.headed }}
+          WF_SCROLL_MAX: ${{ github.event.inputs.scroll_max }}
+          WF_MAX_PARSE: ${{ github.event.inputs.max_parse_results }}
+          WF_SHARDS: ${{ github.event.inputs.shards }}
+          WF_CAPTURE_SCREENSHOTS: ${{ github.event.inputs.capture_screenshots }}
+          WF_CAPTURE_PAGE_SOURCE: ${{ github.event.inputs.capture_page_source }}
+          DISPATCH_QUERIES: ${{ github.event.client_payload.queries }}
+          DISPATCH_COORDINATES: ${{ github.event.client_payload.coordinates }}
+          DISPATCH_LAT: ${{ github.event.client_payload.lat }}
+          DISPATCH_LON: ${{ github.event.client_payload.lon }}
+          DISPATCH_ZOOM: ${{ github.event.client_payload.zoom }}
+          DISPATCH_HEADED: ${{ github.event.client_payload.headed }}
+          DISPATCH_SCROLL_MAX: ${{ github.event.client_payload.scroll_max }}
+          DISPATCH_MAX_PARSE: ${{ github.event.client_payload.max_parse_results }}
+          DISPATCH_SHARDS: ${{ github.event.client_payload.shards }}
+          DISPATCH_CAPTURE_SCREENSHOTS: ${{ github.event.client_payload.capture_screenshots }}
+          DISPATCH_CAPTURE_PAGE_SOURCE: ${{ github.event.client_payload.capture_page_source }}
+        run: |
+          set -euo pipefail
+
+          queries="${WF_QUERIES:-}"
+          coordinates="${WF_COORDINATES:-}"
+          lat="${WF_LAT:-}"
+          lon="${WF_LON:-}"
+          zoom="${WF_ZOOM:-}"
+          headed="${WF_HEADED:-}"
+          scroll_max="${WF_SCROLL_MAX:-}"
+          max_parse="${WF_MAX_PARSE:-}"
+          shards="${WF_SHARDS:-}"
+          capture_screenshots="${WF_CAPTURE_SCREENSHOTS:-}"
+          capture_page_source="${WF_CAPTURE_PAGE_SOURCE:-}"
+
+          if [ "$EVENT_NAME" = "repository_dispatch" ]; then
+            queries="${DISPATCH_QUERIES:-}"
+            coordinates="${DISPATCH_COORDINATES:-}"
+            lat="${DISPATCH_LAT:-}"
+            lon="${DISPATCH_LON:-}"
+            zoom="${DISPATCH_ZOOM:-}"
+            headed="${DISPATCH_HEADED:-}"
+            scroll_max="${DISPATCH_SCROLL_MAX:-}"
+            max_parse="${DISPATCH_MAX_PARSE:-}"
+            shards="${DISPATCH_SHARDS:-}"
+            capture_screenshots="${DISPATCH_CAPTURE_SCREENSHOTS:-}"
+            capture_page_source="${DISPATCH_CAPTURE_PAGE_SOURCE:-}"
+          fi
+
+          if [ -z "${queries// }" ]; then
+            queries="convenience store, grocery, family diner, snacks brokerage, atm, financial, gas station, truck stop, rest stop, pizza, juice shop, tapioca, alternative, holistic, yoga pilates, food service, kitchen for rent, campus, library, government office, aging clinic, nursing, golf, store, restaurant, kitchen repair, auto repair, campground, roasted nuts, dog park, pet store, feed store, heavy equipment, escape room, brunch, construction, business incubator, llc, corporation, law firm partners, associates, sales team, technician, electrician, hardware supply, hobby store, landscape supply, garden center, amusement, library, repair service, fast food, shopping, lounge, pub, night club, entertainment venue, video games, supermarket, sporting goods, butcher, deli, products distributor, shipping, health clinic, nutrition, dry cleaning laundry, disc golf, retail, department store, supplements, car clean, event center, liquor production, shooting range, classes, bowling, laser tag, sports complex, candy store, locksmith, equine"
+          fi
+
+          if [ -z "${shards// }" ]; then
+            shards="2"
+          fi
+          if ! [[ "$shards" =~ ^[0-9]+$ ]]; then
+            shards="2"
+          fi
+          if [ "$shards" -lt 1 ]; then
+            shards="1"
+          fi
+
+          if [ -z "${scroll_max// }" ]; then
+            scroll_max="40"
+          fi
+          if ! [[ "$scroll_max" =~ ^[0-9]+$ ]]; then
+            scroll_max="40"
+          fi
+
+          if [ -z "${max_parse// }" ]; then
+            max_parse="0"
+          fi
+          if ! [[ "$max_parse" =~ ^[0-9]+$ ]]; then
+            max_parse="0"
+          fi
+
+          if [ -z "${zoom// }" ]; then
+            zoom="12"
+          fi
+          if ! [[ "$zoom" =~ ^[0-9]+$ ]]; then
+            zoom="12"
+          fi
+
+          if [ -z "${headed// }" ]; then
+            headed="false"
+          fi
+          headed=$(printf '%s' "$headed" | tr '[:upper:]' '[:lower:]')
+          case "$headed" in
+            1|true|yes|on) headed="true" ;;
+            *) headed="false" ;;
+          esac
+
+          if [ -z "${capture_screenshots// }" ]; then
+            capture_screenshots="true"
+          fi
+          capture_screenshots=$(printf '%s' "$capture_screenshots" | tr '[:upper:]' '[:lower:]')
+          case "$capture_screenshots" in
+            0|false|no|off) capture_screenshots="false" ;;
+            *) capture_screenshots="true" ;;
+          esac
+
+          if [ -z "${capture_page_source// }" ]; then
+            capture_page_source="true"
+          fi
+          capture_page_source=$(printf '%s' "$capture_page_source" | tr '[:upper:]' '[:lower:]')
+          case "$capture_page_source" in
+            0|false|no|off) capture_page_source="false" ;;
+            *) capture_page_source="true" ;;
+          esac
+
+          echo "queries=${queries}" >> "$GITHUB_OUTPUT"
+          echo "coordinates=${coordinates}" >> "$GITHUB_OUTPUT"
+          echo "lat=${lat}" >> "$GITHUB_OUTPUT"
+          echo "lon=${lon}" >> "$GITHUB_OUTPUT"
+          echo "zoom=${zoom}" >> "$GITHUB_OUTPUT"
+          echo "headed=${headed}" >> "$GITHUB_OUTPUT"
+          echo "capture_screenshots=${capture_screenshots}" >> "$GITHUB_OUTPUT"
+          echo "capture_page_source=${capture_page_source}" >> "$GITHUB_OUTPUT"
+          echo "scroll_max=${scroll_max}" >> "$GITHUB_OUTPUT"
+          echo "max_parse_results=${max_parse}" >> "$GITHUB_OUTPUT"
+          echo "shards=${shards}" >> "$GITHUB_OUTPUT"
+      - name: Compute shard matrix
+        id: compute
+        env:
+          QUERIES: ${{ steps.params.outputs.queries }}
+          SHARDS: ${{ steps.params.outputs.shards }}
+        run: |
+          set -euo pipefail
+
+          MATRIX=$(python <<'PY'
+          import json
+          import os
+          import re
+
+          queries = os.getenv("QUERIES", "")
+          try:
+              shards = int(os.getenv("SHARDS", "1"))
+          except ValueError:
+              shards = 1
+          shards = max(1, shards)
+
+          parts = [p.strip() for p in queries.split(",") if p.strip()]
+          if not parts:
+              parts = ["supermarket in Los Angeles"]
+
+          buckets = [[] for _ in range(shards)]
+          for idx, value in enumerate(parts):
+              buckets[idx % shards].append(value)
+
+          def slugify(text: str) -> str:
+              slug = re.sub(r"[^a-z0-9]+", "-", text.strip().lower())
+              return slug.strip('-') or "shard"
+
+          matrix = []
+          for index, bucket in enumerate(buckets, start=1):
+              name = f"shard-{index}"
+              queries = ", ".join(bucket)
+              matrix.append({
+                  "name": name,
+                  "queries": queries,
+                  "slug": slugify(name),
+              })
+
+          print(json.dumps(matrix))
+          PY
+          )
+
+          echo "Computed matrix: ${MATRIX}"
+          echo "matrix=${MATRIX}" >> "$GITHUB_OUTPUT"
+
+  matrix-scrape:
+    needs: build-matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJson(needs.build-matrix.outputs.matrix) }}
+    env:
+      PY_COLORS: "1"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Cache pip dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip wheel
+          pip install -r requirements.txt
+          pip install "psycopg[binary]>=3.1"
+          pip install .
+          seleniumbase install chromedriver
+
+      - name: Prepare directories
+        run: |
+          mkdir -p downloaded_files latest_logs
+
+      - name: Run shard
+        env:
+          MAPS_LOCAL_DB_URL: ${{ secrets.MAPS_LOCAL_DB_URL }}
+          MAPS_LOCAL_DB_TABLE: ${{ secrets.MAPS_LOCAL_DB_TABLE || 'public.maps' }}
+          MAPS_LOCAL_DB_STAGING_TABLE: ${{ secrets.MAPS_LOCAL_DB_STAGING_TABLE || 'public.maps_profiles_staging' }}
+          MAPS_LOCAL_DB_CHUNK_SIZE: ${{ secrets.MAPS_LOCAL_DB_CHUNK_SIZE || 500 }}
+          SUPABASE_URL: ${{ secrets.MAPS_SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.MAPS_SUPABASE_SERVICE_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.MAPS_SUPABASE_SERVICE_KEY }}
+          SUPABASE_TABLE: ${{ secrets.MAPS_SUPABASE_TABLE || '' }}
+          SUPABASE_STAGING_TABLE: ${{ secrets.MAPS_SUPABASE_STAGING_TABLE || 'public.maps_profiles_staging' }}
+          SUPABASE_BUCKET: ${{ secrets.MAPS_SUPABASE_BUCKET || 'maps-artifacts' }}
+          RUN_COORDINATES: ${{ needs.build-matrix.outputs.coordinates }}
+          RUN_LAT: ${{ needs.build-matrix.outputs.lat }}
+          RUN_LON: ${{ needs.build-matrix.outputs.lon }}
+          RUN_ZOOM: ${{ needs.build-matrix.outputs.zoom }}
+          RUN_HEADED: ${{ needs.build-matrix.outputs.headed }}
+          RUN_SCROLL_MAX: ${{ needs.build-matrix.outputs.scroll_max }}
+          RUN_MAX_PARSE: ${{ needs.build-matrix.outputs.max_parse_results }}
+          RUN_CAPTURE_SCREENSHOTS: ${{ needs.build-matrix.outputs.capture_screenshots }}
+          RUN_CAPTURE_PAGE_SOURCE: ${{ needs.build-matrix.outputs.capture_page_source }}
+        run: |
+          set -euo pipefail
+
+          shard_name="${{ matrix.shard.name }}"
+          shard_slug="${{ matrix.shard.slug }}"
+          shard_queries="${{ matrix.shard.queries }}"
+
+          if [ -z "${shard_queries// }" ]; then
+            echo "⚠️ ${shard_name}: No queries assigned; skipping"
+            exit 0
+          fi
+
+          mkdir -p "logs/${shard_slug}"
+
+          ARGS=(maps_parallel_scraper.py)
+          ARGS+=(--queries "${shard_queries}")
+          ARGS+=(--log-dir "logs/${shard_slug}")
+
+          if [ -n "${RUN_COORDINATES// }" ]; then
+            ARGS+=(--coordinates "${RUN_COORDINATES}")
+          else
+            if [ -n "${RUN_LAT// }" ]; then
+              ARGS+=(--lat "${RUN_LAT}")
+            fi
+            if [ -n "${RUN_LON// }" ]; then
+              ARGS+=(--lon "${RUN_LON}")
+            fi
+          fi
+
+          ARGS+=(--zoom "${RUN_ZOOM}")
+          ARGS+=(--scroll-max "${RUN_SCROLL_MAX}")
+
+          if [ -n "${RUN_MAX_PARSE// }" ] && [ "${RUN_MAX_PARSE}" != "0" ]; then
+            ARGS+=(--max-parse-results "${RUN_MAX_PARSE}")
+          fi
+
+          if [ "${RUN_HEADED}" = "true" ]; then
+            ARGS+=(--headed)
+          fi
+
+          ARGS+=(--user-data-dir "/tmp/chrome_${shard_slug}")
+
+          if [ -n "$MAPS_LOCAL_DB_URL" ]; then
+            ARGS+=(--local-db-url "$MAPS_LOCAL_DB_URL")
+          fi
+          if [ -n "$MAPS_LOCAL_DB_TABLE" ]; then
+            ARGS+=(--local-db-table "$MAPS_LOCAL_DB_TABLE")
+          fi
+          if [ -n "$MAPS_LOCAL_DB_STAGING_TABLE" ]; then
+            ARGS+=(--local-db-staging-table "$MAPS_LOCAL_DB_STAGING_TABLE")
+          fi
+          if [ -n "$MAPS_LOCAL_DB_CHUNK_SIZE" ]; then
+            ARGS+=(--local-db-chunk-size "$MAPS_LOCAL_DB_CHUNK_SIZE")
+          fi
+
+          if [ "${RUN_CAPTURE_SCREENSHOTS}" != "true" ]; then
+            ARGS+=(--no-screenshots)
+          fi
+          if [ "${RUN_CAPTURE_PAGE_SOURCE}" != "true" ]; then
+            ARGS+=(--no-page-source)
+          fi
+
+          echo "🔹 ${shard_name}: python ${ARGS[*]}"
+          python "${ARGS[@]}"
+
+      - name: Upload shard artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: maps-${{ matrix.shard.slug }}-${{ github.run_number }}
+          path: |
+            logs/${{ matrix.shard.slug }}/result.csv
+            logs/${{ matrix.shard.slug }}/
+            latest_logs/
+          retention-days: 7
