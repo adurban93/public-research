@@ -33,6 +33,11 @@ on:
         required: false
         type: boolean
         default: false
+      block_media:
+        description: "Block heavy media resources (images, fonts, videos)"
+        required: false
+        type: boolean
+        default: true
       scroll_max:
         description: "Maximum sidebar scrolls"
         required: false
@@ -64,6 +69,7 @@ jobs:
       headed: ${{ steps.params.outputs.headed }}
       capture_screenshots: ${{ steps.params.outputs.capture_screenshots }}
       capture_page_source: ${{ steps.params.outputs.capture_page_source }}
+      block_media: ${{ steps.params.outputs.block_media }}
       scroll_max: ${{ steps.params.outputs.scroll_max }}
       max_parse_results: ${{ steps.params.outputs.max_parse_results }}
       shards: ${{ steps.params.outputs.shards }}
@@ -83,6 +89,7 @@ jobs:
           WF_SHARDS: ${{ github.event.inputs.shards }}
           WF_CAPTURE_SCREENSHOTS: ${{ github.event.inputs.capture_screenshots }}
           WF_CAPTURE_PAGE_SOURCE: ${{ github.event.inputs.capture_page_source }}
+          WF_BLOCK_MEDIA: ${{ github.event.inputs.block_media }}
           DISPATCH_QUERIES: ${{ github.event.client_payload.queries }}
           DISPATCH_COORDINATES: ${{ github.event.client_payload.coordinates }}
           DISPATCH_LAT: ${{ github.event.client_payload.lat }}
@@ -94,6 +101,7 @@ jobs:
           DISPATCH_SHARDS: ${{ github.event.client_payload.shards }}
           DISPATCH_CAPTURE_SCREENSHOTS: ${{ github.event.client_payload.capture_screenshots }}
           DISPATCH_CAPTURE_PAGE_SOURCE: ${{ github.event.client_payload.capture_page_source }}
+          DISPATCH_BLOCK_MEDIA: ${{ github.event.client_payload.block_media }}
         run: |
           set -euo pipefail
 
@@ -108,6 +116,7 @@ jobs:
           shards="${WF_SHARDS:-}"
           capture_screenshots="${WF_CAPTURE_SCREENSHOTS:-}"
           capture_page_source="${WF_CAPTURE_PAGE_SOURCE:-}"
+          block_media="${WF_BLOCK_MEDIA:-}"
 
           if [ "$EVENT_NAME" = "repository_dispatch" ]; then
             queries="${DISPATCH_QUERIES:-}"
@@ -121,6 +130,7 @@ jobs:
             shards="${DISPATCH_SHARDS:-}"
             capture_screenshots="${DISPATCH_CAPTURE_SCREENSHOTS:-}"
             capture_page_source="${DISPATCH_CAPTURE_PAGE_SOURCE:-}"
+            block_media="${DISPATCH_BLOCK_MEDIA:-}"
           fi
 
           if [ -z "${queries// }" ]; then
@@ -185,6 +195,15 @@ jobs:
             *) capture_page_source="true" ;;
           esac
 
+          if [ -z "${block_media// }" ]; then
+            block_media="true"
+          fi
+          block_media=$(printf '%s' "$block_media" | tr '[:upper:]' '[:lower:]')
+          case "$block_media" in
+            0|false|no|off) block_media="false" ;;
+            *) block_media="true" ;;
+          esac
+
           echo "queries=${queries}" >> "$GITHUB_OUTPUT"
           echo "coordinates=${coordinates}" >> "$GITHUB_OUTPUT"
           echo "lat=${lat}" >> "$GITHUB_OUTPUT"
@@ -193,6 +212,7 @@ jobs:
           echo "headed=${headed}" >> "$GITHUB_OUTPUT"
           echo "capture_screenshots=${capture_screenshots}" >> "$GITHUB_OUTPUT"
           echo "capture_page_source=${capture_page_source}" >> "$GITHUB_OUTPUT"
+          echo "block_media=${block_media}" >> "$GITHUB_OUTPUT"
           echo "scroll_max=${scroll_max}" >> "$GITHUB_OUTPUT"
           echo "max_parse_results=${max_parse}" >> "$GITHUB_OUTPUT"
           echo "shards=${shards}" >> "$GITHUB_OUTPUT"
@@ -306,6 +326,7 @@ jobs:
           RUN_MAX_PARSE: ${{ needs.build-matrix.outputs.max_parse_results }}
           RUN_CAPTURE_SCREENSHOTS: ${{ needs.build-matrix.outputs.capture_screenshots }}
           RUN_CAPTURE_PAGE_SOURCE: ${{ needs.build-matrix.outputs.capture_page_source }}
+          RUN_BLOCK_MEDIA: ${{ needs.build-matrix.outputs.block_media }}
         run: |
           set -euo pipefail
 
@@ -366,6 +387,9 @@ jobs:
           fi
           if [ "${RUN_CAPTURE_PAGE_SOURCE}" != "true" ]; then
             ARGS+=(--no-page-source)
+          fi
+          if [ "${RUN_BLOCK_MEDIA}" != "true" ]; then
+            ARGS+=(--no-block-media)
           fi
 
           echo "🔹 ${shard_name}: python ${ARGS[*]}"
